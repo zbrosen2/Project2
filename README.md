@@ -1,0 +1,1 @@
+This app uses the R package Shiny and will demonstrate my mastery of the objectives taught in ST 558.  Specifically, I will be querying an API and summarizing the data that is returned, and I will be using shiny to build an interactive web application.
