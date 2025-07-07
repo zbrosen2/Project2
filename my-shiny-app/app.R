@@ -12,6 +12,7 @@ library(tidyverse)
 library(jsonlite)
 library(glue)
 library(shinyjs)
+library(httr)
 
 api_key <- "L58lHADabwegckmkXK6imqqmMWF3nix4"
 
@@ -156,16 +157,24 @@ server <- function(input, output, session) {
   gif_list <- eventReactive(input$get, {
     type <- input$type
     if (input$endpoint == "trending") {
-      getTrending(limit = input$limit, type = type)
+      resp <- getTrending(limit = input$limit, type = type)
+      write_csv(map_dfr(resp, as_tibble), file = glue("trending_{type}.csv"))
+      resp
     }
     else if (input$endpoint == "search") {
-      getSearch(q = input$q, type = type)
+      resp <- getSearch(q = input$q, type = type)
+      write_csv(map_dfr(resp, as_tibble), file = glue("search_{type}.csv"))
+      resp
     }
     else if (input$endpoint == "getGIF") {
-      getGIF(gif_id = input$gif_id)
+      resp <- getGIF(gif_id = input$gif_id)
+      write_csv(map_dfr(resp, as_tibble), file = "getGIF.csv")
+      resp
     }
     else if (input$endpoint == "getEmoji") {
-      getEmoji()
+      resp <- getEmoji()
+      write_csv(map_dfr(resp, as_tibble), file = "getEmoji.csv")
+      resp
     }
     else {
       NULL
@@ -174,12 +183,14 @@ server <- function(input, output, session) {
   
   category_list <- eventReactive(input$get, {
     if (input$endpoint == "getCategories") {
-      raw <- getCategories()
-      tibble(
-        name = map_chr(raw, "name"),
-        subcategories = map_chr(raw, ~ paste(map_chr(.x$subcategories, "name"), collapse = ", ")),
-        example_gif_id = map_chr(raw, ~ .x$gif$id)
+      resp <- getCategories()
+      catTibble <- tibble(
+        name = map_chr(resp, "name"),
+        subcategories = map_chr(resp, ~ paste(map_chr(.x$subcategories, "name"), collapse = ", ")),
+        example_gif_id = map_chr(resp, ~ .x$gif$id)
       )
+      write_csv(catTibble, file = "getCategories.csv")
+      catTibble
     }
     else {
       NULL
