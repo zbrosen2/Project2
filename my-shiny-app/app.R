@@ -12,7 +12,6 @@ library(tidyverse)
 library(jsonlite)
 library(glue)
 library(shinyjs)
-library(listviewer)
 
 api_key <- "L58lHADabwegckmkXK6imqqmMWF3nix4"
 
@@ -65,16 +64,6 @@ getGIF <- function(gif_id = "xT4uQulxzV39haRFjG") {
   ))
 }
 
-getCategories <- function() {
-  list(
-    api_key = api_key
-  ) %>%
-  GET("https://api.giphy.com/v1/gifs/categories", query = .) %>%
-    content(as = "text", encoding = "UTF-8") %>%
-    fromJSON(simplifyVector = FALSE) %>%
-    pluck("data")
-}
-
 getEmoji <- function(limit = 10) {
   list(
     api_key = api_key,
@@ -89,6 +78,16 @@ getEmoji <- function(limit = 10) {
       width = .x$images$original$width,
       height = .x$images$original$height
     ))
+}
+
+getCategories <- function() {
+  list(
+    api_key = api_key
+  ) %>%
+  GET("https://api.giphy.com/v1/gifs/categories", query = .) %>%
+    content(as = "text", encoding = "UTF-8") %>%
+    fromJSON(simplifyVector = FALSE) %>%
+    pluck("data")
 }
 
 ui <- fluidPage(
@@ -121,8 +120,8 @@ ui <- fluidPage(
             "GIPHY Trending" = "trending",
             "GIPHY Search" = "search",
             "GIPHY getGIF" = "getGIF",
-            "GIPHY getCategories" = "getCategories",
-            "GIPHY getEmoji" = "getEmoji"
+            "GIPHY getEmoji" = "getEmoji",
+            "GIPHY getCategories" = "getCategories"
           )),
           actionButton("get", "GET"),
           conditionalPanel(
@@ -140,7 +139,7 @@ ui <- fluidPage(
         ),
         mainPanel(
           uiOutput("gifDisplay"),
-          jsoneditOutput("categoryViewer")
+          tableOutput("categoryViewer")
         )
       )
     )
@@ -175,7 +174,12 @@ server <- function(input, output, session) {
   
   category_list <- eventReactive(input$get, {
     if (input$endpoint == "getCategories") {
-      getCategories()
+      raw <- getCategories()
+      tibble(
+        name = map_chr(raw, "name"),
+        subcategories = map_chr(raw, ~ paste(map_chr(.x$subcategories, "name"), collapse = ", ")),
+        example_gif_id = map_chr(raw, ~ .x$gif$id)
+      )
     }
     else {
       NULL
@@ -184,24 +188,36 @@ server <- function(input, output, session) {
   
   output$gifDisplay <- renderUI({
     gifs <- gif_list()
+    gif_tibble <- map_dfr(gifs, as_tibble)
     req(gifs)
     
-    tagList(
-      lapply(gifs, function(gif) {
-        tags$img(
-          src = gif$url,
-          width = paste0(gif$width, "px"),
-          height = paste0(gif$height, "px"),
-          style = "margin:10px; display:block;"
+    fluidRow(
+      column(
+        width = 6,
+        tagList(
+          lapply(gifs, function(gif) {
+            tags$img(
+              src = gif$url,
+              width = paste0(gif$width, "px"),
+              height = paste0(gif$height, "px"),
+              style = "margin:10px; display:block;"
+            )
+          })
         )
-      })
+      ),
+      column(
+        width = 6,
+        tags$pre(
+          gif_tibble %>% 
+          capture.output() %>%
+          paste(collapse = "\n")
+        )
+      )
     )
   })
   
-  output$categoryViewer <- renderJsonedit({
-    categories <- category_list()
-    req(categories)
-    jsonedit(categories)
+  output$categoryViewer <- renderTable({
+    category_list()
   })
   
   observe({
@@ -217,4 +233,5 @@ server <- function(input, output, session) {
 }
 
 # Run the application 
+options(shiny.launch.browser = TRUE)
 shinyApp(ui = ui, server = server)
