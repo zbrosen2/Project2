@@ -1,12 +1,3 @@
-#
-# This is a Shiny web application. You can run the application by clicking
-# the 'Run App' button above.
-#
-# Find out more about building applications with Shiny here:
-#
-#    http://shiny.rstudio.com/
-#
-
 library(shiny)
 library(tidyverse)
 library(jsonlite)
@@ -16,22 +7,32 @@ library(httr)
 
 api_key <- "L58lHADabwegckmkXK6imqqmMWF3nix4"
 
+# functions that call web API endpoints (GIPHY)
+
+# trending endpoint with limit query param
+# returns trending gifs/stickers
 getTrending <- function(limit = 10, type = "gifs") {
   list(
     api_key = api_key,
     limit = limit
   ) %>%
+    # glue type to URI (gif or sticker)
     GET(glue("https://api.giphy.com/v1/{type}/trending"), query = .) %>%
+    # format response and pluck data
     content(as = "text", encoding = "UTF-8") %>%
     fromJSON(simplifyVector = FALSE) %>%
     pluck("data") %>%
+    # extract original image properties from each object
     map(~ list(
       url = .x$images$original$url,
       width = .x$images$original$width,
-      height = .x$images$original$height
+      height = .x$images$original$height,
+      size = .x$images$original$size
     ))
 }
 
+# search endpoint with q (query) and limit query params
+# returns gifs/stickers that match q (query)
 getSearch <- function(q = "hi", limit = 10, type = "gifs") {
   list(
     api_key = api_key,
@@ -39,60 +40,94 @@ getSearch <- function(q = "hi", limit = 10, type = "gifs") {
     limit = limit
   ) %>%
     GET(glue("https://api.giphy.com/v1/{type}/search"), query = .) %>%
+    # format response and pluck data
     content(as = "text", encoding = "UTF-8") %>%
     fromJSON(simplifyVector = FALSE) %>%
     pluck("data") %>%
+    # extract original image properties from each object
     map(~ list(
       url = .x$images$original$url,
       width = .x$images$original$width,
-      height = .x$images$original$height
+      height = .x$images$original$height,
+      size = .x$images$original$size
     ))
 }
 
+# get gif by id endpoint with gif_id query param
+# returns gif that corresponds to provided id
 getGIF <- function(gif_id = "xT4uQulxzV39haRFjG") {
   resp <- list(
     api_key = api_key
   ) %>%
-    GET(glue("https://api.giphy.com/v1/gifs/{gif_id}"), query = .) %>%
+    GET(glue("https://api.giphy.com/v1/gifs/{gif_id}"), query = .)
+  
+  # error handling if gif_id does not exist
+  if (http_error(resp)) {
+    body <- content(resp, as = "text", encoding = "UTF-8") %>%
+      fromJSON(simplifyVector = TRUE)
+    
+    status <- body$meta$status
+    msg <- body$meta$msg
+    error_detail <- body$meta$error_code
+    
+    showNotification(glue("HTTP Status {status} {msg}: {error_detail}"), type = "error")
+    return(NULL)
+  }
+  
+  # format response and pluck data
+  resp <- resp %>%
     content(as = "text", encoding = "UTF-8") %>%
     fromJSON(simplifyVector = FALSE) %>%
     pluck("data")
   
+  # extract original image properties from object
   list(list(
     url = resp$images$original$url,
     width = resp$images$original$width,
-    height = resp$images$original$height
+    height = resp$images$original$height,
+    size = resp$images$original$size
   ))
 }
 
+# get emojis endpoint with limit query param
+# returns emojis
 getEmoji <- function(limit = 10) {
   list(
     api_key = api_key,
     limit = limit
   ) %>%
     GET("https://api.giphy.com/v2/emoji", query = .) %>%
+    # format response and pluck data
     content(as = "text", encoding = "UTF-8") %>%
     fromJSON(simplifyVector = FALSE) %>%
     pluck("data") %>%
+    # extract original image properties from each object
     map(~ list(
       url = .x$images$original$url,
       width = .x$images$original$width,
-      height = .x$images$original$height
+      height = .x$images$original$height,
+      size = .x$images$original$size
     ))
 }
 
+# categories endpoint
+# returns categories, subcategories, and an example gif that belongs to category
 getCategories <- function() {
   list(
     api_key = api_key
   ) %>%
   GET("https://api.giphy.com/v1/gifs/categories", query = .) %>%
+    # format response and pluck data
     content(as = "text", encoding = "UTF-8") %>%
     fromJSON(simplifyVector = FALSE) %>%
     pluck("data")
 }
 
+# define ui
+# start with fluid page and use shiny js
 ui <- fluidPage(
   useShinyjs(),
+  # add global padding to top
   tags$head(
     tags$style(HTML("
       .tab-pane {
@@ -101,22 +136,28 @@ ui <- fluidPage(
     "))
   ),
 
-  # Title
+  # title
   titlePanel("GIPHY Shiny App"),
 
+  # define tabset
   tabsetPanel(
+    # about tab
     tabPanel(
       "About",
       textOutput("about")
     ),
+    # data download tab
     tabPanel(
       "Data Download",
+      # define sidebar
       sidebarLayout(
         sidebarPanel(
+          # radio buttons to select media type
           radioButtons("type", "Media type:",
                        choices = c("GIFs" = "gifs", "Stickers" = "stickers"),
                        selected = "gifs",
                        inline = TRUE),
+          # endpoint selector
           selectInput("endpoint", "Choose an endpoint", choices = c(
             "GIPHY Trending" = "trending",
             "GIPHY Search" = "search",
@@ -124,71 +165,158 @@ ui <- fluidPage(
             "GIPHY getEmoji" = "getEmoji",
             "GIPHY getCategories" = "getCategories"
           )),
+          # define GET button (clicking sends an HTTP GET request to corresponding endpoint)
           actionButton("get", "GET"),
+          # provide limit query param slider for corresponding endpoints
           conditionalPanel(
-            condition = "input.endpoint == 'trending'",
+            condition = "input.endpoint == 'trending' || input.endpoint == 'search'
+                        || input.endpoint == 'getEmoji'",
             sliderInput("limit", "limit", min = 1, max = 50, value = 10)
           ),
+          # provide text input for search endpoint with 'hi' as default query
           conditionalPanel(
             condition = "input.endpoint == 'search'",
             textInput("q", "q", value = "hi")
           ),
+          # provide text input for get gif by id endpoint with default
           conditionalPanel(
             condition = "input.endpoint == 'getGIF'",
             textInput("gif_id", "gif_id", value = "xT4uQulxzV39haRFjG")
           )
         ),
+        # output gifs/stickers/emojis and category table when server asks for it
         mainPanel(
           uiOutput("gifDisplay"),
           tableOutput("categoryViewer")
+        )
+      )
+    ),
+    # data exploration tab
+    tabPanel(
+      "Data Exploration",
+      sidebarLayout(
+        # reset data button
+        sidebarPanel(
+          div(
+            actionButton("resetData", "Reset All Retrieved Data"),
+            style = "margin-bottom: 20px;"
+          ),
+          # output variable selection when server asks for it
+          uiOutput("variableSelect"),
+          # summary type input
+          selectInput("summaryType", "Summary Type:",
+                      choices = c("Numerical Summary", "Contingency Table")),
+          # plot type input
+          selectInput("plotType", "Plot Type:",
+                      choices = c("Bar Plot", "Box Plot", "Scatter Plot", "Heatmap")),
+          # facet toggle
+          checkboxInput("facetToggle", "Facet by second variable", value = FALSE),
+          # output facet variable UI when server asks for it
+          uiOutput("facetVarUI")
+        ),
+        mainPanel(
+          # output data warning when server asks for it
+          uiOutput("dataWarning"),
+          # output summary and plot when server asks for it
+          uiOutput("summaryAndPlot")
         )
       )
     )
   )
 )
 
+# define server
 server <- function(input, output, session) {
+  # define reactive cumulative data value
+  cumulative_data <- reactiveVal(tibble())
+  
+  # render about text
   output$about <- renderText({
     "This app uses the R package Shiny and will demonstrate my mastery of the 
     objectives taught in ST 558. Specifically, I will be querying an API and 
     summarizing the data that is returned, and I will be using shiny to build 
     an interactive web application. ... FINISH ME"
   })
-  gif_list <- eventReactive(input$get, {
-    type <- input$type
-    if (input$endpoint == "trending") {
-      resp <- getTrending(limit = input$limit, type = type)
-      write_csv(map_dfr(resp, as_tibble), file = glue("trending_{type}.csv"))
-      resp
-    }
-    else if (input$endpoint == "search") {
-      resp <- getSearch(q = input$q, type = type)
-      write_csv(map_dfr(resp, as_tibble), file = glue("search_{type}.csv"))
-      resp
-    }
-    else if (input$endpoint == "getGIF") {
-      resp <- getGIF(gif_id = input$gif_id)
-      write_csv(map_dfr(resp, as_tibble), file = "getGIF.csv")
-      resp
-    }
-    else if (input$endpoint == "getEmoji") {
-      resp <- getEmoji()
-      write_csv(map_dfr(resp, as_tibble), file = "getEmoji.csv")
-      resp
-    }
-    else {
-      NULL
+  
+  # render data warning
+  output$dataWarning <- renderUI({
+    if (nrow(cumulative_data()) == 0) {
+      tags$p("Please start by selecting an endpoint and clicking 'GET' in the Data Download tab.
+             Data will be cumulatively added as 'GET' is clicked.
+             Note that the 'categories' endpoint does not affect this tab.")
     }
   })
   
+  # render summary and plot
+  output$summaryAndPlot <- renderUI({
+    if (nrow(cumulative_data()) != 0) {
+      fluidRow(
+        column(
+          width = 6,
+          tags$h4("Summary"),
+          tableOutput("summaryTable")
+        ),
+        column(
+          width = 6,
+          tags$h4("Plot"),
+          plotOutput("explorePlot")
+        )
+      )
+    }
+  })
+  
+  # when GET button is pressed (logic for all endpoints but category endpoint)
+  gif_list <- eventReactive(input$get, {
+    # pass type (gifs, stickers, or emojis)
+    type <- input$type
+    
+    # call endpoint functions when those endpoints are selected by user
+    # download data to csv
+    if (input$endpoint == "trending") {
+      resp <- getTrending(limit = input$limit, type = type)
+      write_csv(map_dfr(resp, as_tibble), file = glue("trending_{type}.csv"))
+    }
+    else if (input$endpoint == "search") {
+      resp <- getSearch(q = input$q, limit = input$limit, type = type)
+      write_csv(map_dfr(resp, as_tibble), file = glue("search_{type}.csv"))
+    }
+    else if (input$endpoint == "getGIF") {
+      # gsub for data cleansing (remove spaces)
+      resp <- getGIF(gif_id = gsub(" ", "", input$gif_id))
+      write_csv(map_dfr(resp, as_tibble), file = "getGIF.csv")
+    }
+    else if (input$endpoint == "getEmoji") {
+      resp <- getEmoji(limit = input$limit)
+      write_csv(map_dfr(resp, as_tibble), file = "getEmoji.csv")
+    }
+    else {
+      return(NULL)
+    }
+    
+    # define new data to add to cumulative data variable
+    new_data <- map_dfr(resp, as_tibble) %>%
+      # allow emoji type if emoji endpoint is used
+      mutate(type = if (input$endpoint == "getEmoji") "emoji" else input$type)
+    
+    # get current cumulative data and bind new data
+    current <- cumulative_data()
+    cumulative_data(bind_rows(current, new_data))
+    
+    return(resp)
+  })
+  
+  # when GET button is pressed (logic for category endpoint)
   category_list <- eventReactive(input$get, {
     if (input$endpoint == "getCategories") {
+      # call category function
       resp <- getCategories()
+      # map category name, subcategories, and example gif id to tibble columns
       catTibble <- tibble(
         name = map_chr(resp, "name"),
         subcategories = map_chr(resp, ~ paste(map_chr(.x$subcategories, "name"), collapse = ", ")),
         example_gif_id = map_chr(resp, ~ .x$gif$id)
       )
+      # download data to csv
       write_csv(catTibble, file = "getCategories.csv")
       catTibble
     }
@@ -197,15 +325,41 @@ server <- function(input, output, session) {
     }
   })
   
+  # data explore reactive function (because it depends on reactive cumulative data)
+  data_explore <- reactive({
+    # get cumulative data
+    gifs <- cumulative_data()
+    req(nrow(gifs) > 0)
+    
+    # convert dimensions and size to numeric and categorize width and height into bins
+    gifs %>%
+      mutate(
+        width = as.numeric(width),
+        height = as.numeric(height),
+        size = as.numeric(size),
+        width_bin = cut(width, breaks = 3, labels = c("Small", "Medium", "Large")),
+        height_bin = cut(height, breaks = 3, labels = c("Short", "Medium", "Tall"))
+      )
+  })
+  
+  # render gifs
   output$gifDisplay <- renderUI({
+    # get gifs and convert to single tibble
     gifs <- gif_list()
     gif_tibble <- map_dfr(gifs, as_tibble)
     req(gifs)
     
+    # handle no gifs found case
+    if (length(gifs) == 0) {
+      return(tags$p("No GIFs found.  Please try a different query."))
+    }
+    
+    # define column for rendering gifs
     fluidRow(
       column(
         width = 6,
         tagList(
+          # loop over each gif and render img tag with inline styling
           lapply(gifs, function(gif) {
             tags$img(
               src = gif$url,
@@ -216,10 +370,17 @@ server <- function(input, output, session) {
           })
         )
       ),
+      # define column for tibble tibble output (endpoint response data)
       column(
         width = 6,
+        # format and display response data (shorten url, extract id, and reorder columns)
         tags$pre(
           gif_tibble %>% 
+            mutate(
+              id = sapply(strsplit(url, "/"), function(x) x[6]),
+              url = paste0(substr(url, 1, 20), "...")
+            ) %>%
+            select(id, everything()) %>%
           capture.output() %>%
           paste(collapse = "\n")
         )
@@ -227,10 +388,102 @@ server <- function(input, output, session) {
     )
   })
   
+  # render category list as table
   output$categoryViewer <- renderTable({
     category_list()
   })
   
+  # render variable selection UI
+  output$variableSelect <- renderUI({
+    # get data for exploration
+    gifsTibble <- data_explore()
+    req(gifsTibble)
+    
+    # input selectors for x and y vars
+    tagList(
+      selectInput("xVar", "X Variable", choices = c("type", "width_bin", "height_bin")),
+      selectInput("yVar", "Y Variable", choices = c("width", "height", "size"))
+    )
+  })
+  
+  # render facet variable UI
+  output$facetVarUI <- renderUI({
+    req(input$facetToggle)
+    # get data for exploration
+    gifsTibble <- data_explore()
+    # input selector for facet variable
+    selectInput("facetVariable", "Facet Variable", choices = c("type", "width_bin", "height_bin"))
+  })
+  
+  # render summary table
+  output$summaryTable <- renderTable({
+    # get data for exploration
+    gifsTibble <- data_explore()
+    req(input$xVar)
+    
+    # if numerical summary is selected
+    if (input$summaryType == "Numerical Summary") {
+      req(input$yVar)
+      # group by x var
+      gifsTibble %>%
+        group_by(.data[[input$xVar]]) %>%
+        # data summary on y var (mean and standard deviation)
+        summarise(
+          mean = mean(.data[[input$yVar]], na.rm = TRUE),
+          sd = sd(.data[[input$yVar]], na.rm = TRUE),
+          .groups = "drop"
+        )
+    }
+    # otherwise render contingency table
+    else {
+      req(input$yVar)
+      table(gifsTibble[[input$xVar]], gifsTibble[[input$yVar]])
+    }
+  })
+  
+  # render plot
+  output$explorePlot <- renderPlot({
+    # get data for exploration
+    gifsTibble <- data_explore()
+    req(input$xVar, input$yVar)
+    
+    # base plot object
+    p <- ggplot(gifsTibble, aes(x = .data[[input$xVar]], y = .data[[input$yVar]]))
+    
+    # bar plot
+    if (input$plotType == "Bar Plot") {
+      p <- p + geom_bar(stat = "identity", fill = "steelblue")
+    # box plot
+    } else if (input$plotType == "Box Plot") {
+      p <- p + geom_boxplot(aes(fill = .data[[input$xVar]])) +
+        theme(legend.position = "none")
+    # scatter plot
+    } else if (input$plotType == "Scatter Plot") {
+      p <- p + geom_point(aes(color = .data[[input$xVar]]), alpha = 0.6)
+    # heat map
+    } else if (input$plotType == "Heatmap") {
+      p <- ggplot(gifsTibble, aes(x = .data[[input$xVar]], y = .data[[input$yVar]])) +
+        geom_bin2d() +
+        scale_fill_viridis_c()
+    }
+    
+    # if facet toggle is selected and the facet variable exists
+    if (input$facetToggle && !is.null(input$facetVariable)) {
+      # add facet variable to plot
+      p <- p + facet_wrap(vars(.data[[input$facetVariable]]))
+    }
+    
+    # add title and x and y labels
+    p + labs(
+      title = paste(input$plotType, "of", input$yVar, "vs", input$xVar),
+      x = input$xVar,
+      y = input$yVar
+    ) +
+    theme_minimal()
+  })
+  
+  # if get gif by id, category, or get emojis endpoint is selected then
+  # disable type radio button (only search and trending endpoints allow type toggling)
   observe({
     if (input$endpoint == "getGIF" || input$endpoint == "getCategories"
         || input$endpoint == "getEmoji") {
@@ -241,8 +494,13 @@ server <- function(input, output, session) {
       enable("type")
     }
   })
+  
+  # if reset data button is pressed then reset cumulative data variable
+  observeEvent(input$resetData, {
+    cumulative_data(tibble())
+  })
 }
 
-# Run the application 
+# run the application 
 options(shiny.launch.browser = TRUE)
 shinyApp(ui = ui, server = server)
