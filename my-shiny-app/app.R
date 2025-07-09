@@ -1,3 +1,6 @@
+# Author: Zachary Rosen
+# Date: 7/8/25
+
 library(shiny)
 library(tidyverse)
 library(jsonlite)
@@ -144,7 +147,7 @@ ui <- fluidPage(
     # about tab
     tabPanel(
       "About",
-      textOutput("about")
+      uiOutput("about")
     ),
     # data download tab
     tabPanel(
@@ -206,13 +209,16 @@ ui <- fluidPage(
           # summary type input
           selectInput("summaryType", "Summary Type:",
                       choices = c("Numerical Summary", "Contingency Table")),
-          # plot type input
-          selectInput("plotType", "Plot Type:",
-                      choices = c("Bar Plot", "Box Plot", "Scatter Plot", "Heatmap")),
-          # facet toggle
-          checkboxInput("facetToggle", "Facet by second variable", value = FALSE),
-          # output facet variable UI when server asks for it
-          uiOutput("facetVarUI")
+          conditionalPanel(
+            condition = "input.summaryType == 'Numerical Summary'",
+            # plot type input
+            selectInput("plotType", "Plot Type:",
+                        choices = c("Bar Plot", "Box Plot", "Scatter Plot", "Heatmap")),
+            # facet toggle
+            checkboxInput("facetToggle", "Facet by second variable", value = FALSE),
+            # output facet variable UI when server asks for it
+            uiOutput("facetVarUI")
+          )
         ),
         mainPanel(
           # output data warning when server asks for it
@@ -231,11 +237,25 @@ server <- function(input, output, session) {
   cumulative_data <- reactiveVal(tibble())
   
   # render about text
-  output$about <- renderText({
-    "This app uses the R package Shiny and will demonstrate my mastery of the 
-    objectives taught in ST 558. Specifically, I will be querying an API and 
-    summarizing the data that is returned, and I will be using shiny to build 
-    an interactive web application. ... FINISH ME"
+  output$about <- renderUI({
+    tagList(
+      tags$p("This app uses the R package Shiny and will demonstrate my mastery of the 
+              objectives taught in ST 558. Specifically, I will be querying an API and 
+              summarizing the data that is returned, and I will be using shiny to build 
+              an interactive web application. The web API I will be using is GIPHY, which
+              hosts many GIFs, Stickers, and Emojis. You can find out more about GIPHY
+              here: https://developers.giphy.com/. The Data Download tab allows you to
+              view GIFs, Stickers, and Emojis that you can retrieve using the web API's
+              various endpoints. You can also see the categories that GIPHY uses. Pressing
+              'GET' also downloads the endpoint's response into a csv file. Pressing
+              'GET' also adds the data to the Data Exploration tab. The Data Exploration tab
+              allows you to explore the data through plots, numerical summaries, and contingency
+              tables. You can customize plot type, summary type, and the variables you want to be
+              considered. You can also add another variable to facet onto a plot"),
+      tags$img(
+        src = "https://ucb35fc568502c0aeab164608c2e.previews.dropboxusercontent.com/p/thumb/ACvoxGnw_ZRp3kVKW6_ni0TK-t13XCWzsacaP0DyQhkNxGpfrXt4bsiOTosQEx5_qxL6yfuSYJXj1Ph3v5HLv4DmGabk-D2bFOM8LiA3UKf_fVwev7DiyqnBCrfaMvKEIffyRo5FffFpz8WoVZsRG_PQM2MtPnR2vejRZIWH_340FQo1nO1sa2atW_RTirhp6rIJoX5PZ01rpQoZq1Qd1YJTSO_8tdy4CyT3PJew1L7i2nP_R8p1c7_iZAeh0RrfMhJfejlyNtKC1I6iDJpGoyfQ6_FZpNK5d67oXwLe9aDkkpTD-hOt6u-UBVrTQ7--ptje_MzhSitRtKbcGIq0idLK/p.png"
+      )
+    )
   })
   
   # render data warning
@@ -250,18 +270,28 @@ server <- function(input, output, session) {
   # render summary and plot
   output$summaryAndPlot <- renderUI({
     if (nrow(cumulative_data()) != 0) {
-      fluidRow(
-        column(
-          width = 6,
-          tags$h4("Summary"),
-          tableOutput("summaryTable")
-        ),
-        column(
-          width = 6,
-          tags$h4("Plot"),
-          plotOutput("explorePlot")
+      if (input$summaryType == "Numerical Summary") {
+        fluidRow(
+          column(
+            width = 6,
+            tags$h4("Summary"),
+            tableOutput("summaryTable")
+          ),
+          column(
+            width = 6,
+            tags$h4("Plot"),
+            plotOutput("explorePlot")
+          )
         )
-      )
+      } else {
+        fluidRow(
+          column(
+            width = 12,
+            tags$h4("Contingency Table"),
+            tableOutput("summaryTable")
+          )
+        )
+      }
     }
   })
   
@@ -390,6 +420,7 @@ server <- function(input, output, session) {
   
   # render category list as table
   output$categoryViewer <- renderTable({
+    req(category_list())
     category_list()
   })
   
@@ -399,11 +430,21 @@ server <- function(input, output, session) {
     gifsTibble <- data_explore()
     req(gifsTibble)
     
-    # input selectors for x and y vars
-    tagList(
-      selectInput("xVar", "X Variable", choices = c("type", "width_bin", "height_bin")),
-      selectInput("yVar", "Y Variable", choices = c("width", "height", "size"))
-    )
+    catVars <- c("type", "width_bin", "height_bin")
+    numVars <- c("width", "height", "size")
+    
+    # ensure categorical variables for contingency table
+    if (input$summaryType == "Contingency Table") {
+      tagList(
+        selectInput("xVar", "X Variable", choices = catVars),
+        selectInput("yVar", "Y Variable", choices = catVars)
+      )
+    } else {
+      tagList(
+        selectInput("xVar", "X Variable", choices = catVars),
+        selectInput("yVar", "Y Variable", choices = numVars)
+      )
+    }
   })
   
   # render facet variable UI
@@ -419,16 +460,22 @@ server <- function(input, output, session) {
   output$summaryTable <- renderTable({
     # get data for exploration
     gifsTibble <- data_explore()
-    req(input$xVar)
+    req(input$xVar, input$yVar)
     
     # if numerical summary is selected
     if (input$summaryType == "Numerical Summary") {
-      req(input$yVar)
+      
+      # make sure y var is numeric
+      if (!is.numeric(gifsTibble[[input$yVar]])) {
+        return(NULL)
+      }
+      
       # group by x var
       gifsTibble %>%
         group_by(.data[[input$xVar]]) %>%
         # data summary on y var (mean and standard deviation)
         summarise(
+          summary_variable = input$yVar,
           mean = mean(.data[[input$yVar]], na.rm = TRUE),
           sd = sd(.data[[input$yVar]], na.rm = TRUE),
           .groups = "drop"
@@ -436,8 +483,15 @@ server <- function(input, output, session) {
     }
     # otherwise render contingency table
     else {
-      req(input$yVar)
-      table(gifsTibble[[input$xVar]], gifsTibble[[input$yVar]])
+      validCats <- c("type", "width_bin", "height_bin")
+      req(input$xVar %in% validCats, input$yVar %in% validCats)
+      
+      table <- table(gifsTibble[[input$xVar]], gifsTibble[[input$yVar]])
+      
+      contingency_df <- as.data.frame(table)
+      colnames(contingency_df)[1:2] <- c(input$xVar, input$yVar)
+      
+      contingency_df
     }
   })
   
